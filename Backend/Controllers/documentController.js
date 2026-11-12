@@ -1,24 +1,18 @@
 
-const fs = require('fs');
-const path = require('path');
 
+const path = require('path');
+const mongoose = require('mongoose');
+
+const supabase = require('../config/supabase');
 const Document = require('../models/Document');
 const Case = require('../models/Case');
 
-const uploadDir = path.join(__dirname, '..', 'uploads');
-
-// Helper: remove uploaded file from local storage
-const removeUploadedFile = (filePath) => {
-  if (filePath && fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-};
+const BUCKET_NAME = 'cfms-documents';
 
 // GET all documents
 const getDocuments = async (req, res, next) => {
   try {
     const { documentType, case: caseId } = req.query;
-
     const filter = {};
 
     if (documentType) filter.documentType = documentType;
@@ -62,8 +56,10 @@ const getDocumentById = async (req, res, next) => {
   }
 };
 
-// UPLOAD actual document
+// UPLOAD document to Supabase Storage
 const createDocument = async (req, res, next) => {
+  let uploadedPath = null;
+
   try {
     const {
       case: caseId,
@@ -71,7 +67,6 @@ const createDocument = async (req, res, next) => {
       documentType
     } = req.body;
 
-    // Check whether a file was uploaded
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -79,39 +74,29 @@ const createDocument = async (req, res, next) => {
       });
     }
 
-    // Validate required information
     if (!caseId || !documentTitle || !documentType) {
-      removeUploadedFile(req.file.path);
-
       return res.status(400).json({
         success: false,
         message: 'Case, document title and document type are required'
       });
     }
 
-    // Validate Case ID
-    if (!require('mongoose').Types.ObjectId.isValid(caseId)) {
-      removeUploadedFile(req.file.path);
-
+    if (!mongoose.Types.ObjectId.isValid(caseId)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid Case ID'
       });
     }
 
-    // Check whether case exists
     const caseExists = await Case.findById(caseId);
 
     if (!caseExists) {
-      removeUploadedFile(req.file.path);
-
       return res.status(404).json({
         success: false,
         message: 'Case not found'
       });
     }
 
-    // Get file extension
     const extension = path.extname(req.file.originalname).toLowerCase();
 
     const formatMap = {
@@ -125,23 +110,33 @@ const createDocument = async (req, res, next) => {
     const fileFormat = formatMap[extension];
 
     if (!fileFormat) {
-      removeUploadedFile(req.file.path);
-
       return res.status(400).json({
         success: false,
         message: 'Unsupported file format'
       });
     }
 
-    // Calculate file size in KB
+    const uniqueName =
+      Date.now() + '-' + Math.round(Math.random() * 1e9);
+
+    uploadedPath = `${caseId}/${uniqueName}${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(uploadedPath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false
+      });
+
+    if (uploadError) throw uploadError;
+
     const fileSizeKB = Math.ceil(req.file.size / 1024);
 
-    // Save document information in MongoDB
     const document = await Document.create({
       case: caseId,
       documentTitle,
       documentType,
-      fileUrl: `/uploads/${req.file.filename}`,
+      fileUrl: uploadedPath,
       fileFormat,
       fileSizeKB,
       uploadedBy: req.user._id
@@ -157,9 +152,10 @@ const createDocument = async (req, res, next) => {
       data: populatedDocument
     });
   } catch (error) {
-    // Remove file if database operation fails
-    if (req.file) {
-      removeUploadedFile(req.file.path);
+    if (uploadedPath) {
+      await supabase.storage
+        .from(BUCKET_NAME)
+        .remove([uploadedPath]);
     }
 
     next(error);
@@ -169,11 +165,7 @@ const createDocument = async (req, res, next) => {
 // UPDATE document metadata
 const updateDocument = async (req, res, next) => {
   try {
-    const allowedFields = [
-      'documentTitle',
-      'documentType'
-    ];
-
+    const allowedFields = ['documentTitle', 'documentType'];
     const updates = {};
 
     allowedFields.forEach((field) => {
@@ -207,7 +199,7 @@ const updateDocument = async (req, res, next) => {
   }
 };
 
-// DOWNLOAD document (protected route)
+// DOWNLOAD document from private Supabase bucket
 const downloadDocument = async (req, res, next) => {
   try {
     const document = await Document.findById(req.params.id);
@@ -219,31 +211,22 @@ const downloadDocument = async (req, res, next) => {
       });
     }
 
-    // Only allow files stored in our uploads directory
-    if (!document.fileUrl.startsWith('/uploads/')) {
-      return res.status(404).json({
-        success: false,
-        message: 'Stored file is unavailable'
-      });
-    }
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(document.fileUrl, 60);
 
-    const filename = path.basename(document.fileUrl);
-    const filePath = path.join(uploadDir, filename);
+    if (error) throw error;
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found on server'
-      });
-    }
-
-    res.download(filePath, filename);
+    res.status(200).json({
+      success: true,
+      downloadUrl: data.signedUrl
+    });
   } catch (error) {
     next(error);
   }
 };
 
-// DELETE document and its physical file
+// DELETE document from Supabase and MongoDB
 const deleteDocument = async (req, res, next) => {
   try {
     const document = await Document.findById(req.params.id);
@@ -255,13 +238,11 @@ const deleteDocument = async (req, res, next) => {
       });
     }
 
-    // Remove physical file from uploads folder
-    if (document.fileUrl.startsWith('/uploads/')) {
-      const filename = path.basename(document.fileUrl);
-      const filePath = path.join(uploadDir, filename);
+    const { error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .remove([document.fileUrl]);
 
-      removeUploadedFile(filePath);
-    }
+    if (error) throw error;
 
     await Document.findByIdAndDelete(document._id);
 

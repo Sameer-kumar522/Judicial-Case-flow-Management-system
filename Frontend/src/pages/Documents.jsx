@@ -155,20 +155,24 @@ export default function Documents() {
   };
 
   // Download document
+  
+  // Download document from private Supabase Storage
   const downloadDocument = async (doc) => {
     try {
+      setError("");
+
       const response = await api.get(
-        `/documents/${doc._id}/download`,
-        { responseType: "blob" }
+        `/documents/${doc._id}/download`
       );
 
-      const url = window.URL.createObjectURL(
-        new Blob([response.data])
-      );
+      const downloadUrl = response.data.downloadUrl;
+
+      if (!downloadUrl) {
+        throw new Error("Download URL not found.");
+      }
 
       const anchor = window.document.createElement("a");
-
-      anchor.href = url;
+      anchor.href = downloadUrl;
       anchor.download =
         `${doc.documentTitle || "document"}.${(
           doc.fileFormat || "pdf"
@@ -178,9 +182,10 @@ export default function Documents() {
       anchor.click();
       anchor.remove();
 
-      window.URL.revokeObjectURL(url);
-    } catch {
-      setError("File download failed.");
+    } catch (err) {
+      setError(
+        err.response?.data?.message || "File download failed."
+      );
     }
   };
 

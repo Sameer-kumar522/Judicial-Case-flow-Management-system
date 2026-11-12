@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 
 const express = require('express');
@@ -15,7 +14,6 @@ const documentRoutes = require('./Routes/documentRoutes');
 const analyticsRoutes = require('./Routes/analyticsRoutes');
 const userRoutes = require('./Routes/userRoutes');
 
-
 const app = express();
 
 // Middleware
@@ -26,20 +24,21 @@ app.use(express.json());
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
-  .catch((err) =>
-    console.error('MongoDB connection error:', err.message)
-  );
+  .catch((err) => {
+    console.error('MongoDB connection error:', err.message);
+  });
 
 // Home route
 app.get('/', (req, res) => {
-  res.send('API is running');
+  res.send('CFMS API is running');
 });
 
 // Health check route
 app.get('/api/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1
-    ? 'Connected'
-    : 'Disconnected';
+  const dbStatus =
+    mongoose.connection.readyState === 1
+      ? 'Connected'
+      : 'Disconnected';
 
   res.status(200).json({
     success: true,
@@ -50,6 +49,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/courts', courtRoutes);
 app.use('/api/judges', judgeRoutes);
@@ -59,12 +59,18 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/users', userRoutes);
 
+// Error handling
 app.use(notFound);
 app.use(errorHandler);
 
-// Start server
-const PORT = process.env.PORT || 5000;
+// Local development only
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export Express app for Vercel
+module.exports = app;
