@@ -32,7 +32,6 @@ The primary goal is to reduce reliance on manual record management, improve info
 - **Judge Management:** Maintain judge records.
 - **Case Management:** Create, view, update, and manage cases.
 - **Hearing Management:** Organize and manage hearing schedules.
-- **Document Management:** Upload and manage case-related documents.
 - **Analytics:** View organized system information and analytical summaries.
 - **User Management:** Manage system users and their access.
 
@@ -57,7 +56,6 @@ The primary goal is to reduce reliance on manual record management, improve info
 ### Cloud Services and Tools
 
 - MongoDB Atlas – Cloud database
-- Supabase Storage – Document storage
 - GitHub – Source code management and version control
 - Postman – API testing
 
@@ -100,10 +98,9 @@ Main database collections include:
 - Judges
 - Cases
 - Hearings
-- Documents
 - Counters
 
-Supabase Storage is used for storing uploaded case-related documents.
+
 
 ## ⚙️ Installation and Setup
 
